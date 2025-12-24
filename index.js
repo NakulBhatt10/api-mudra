@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import { Resend } from "resend";
 
 dotenv.config();
 
@@ -11,19 +11,21 @@ const app = express();
 // Allow your Vite frontend
 app.use(
   cors({
-    origin: true, // you can lock this later
+    origin: true, // lock later to your frontend domain
     methods: ["GET", "POST", "OPTIONS"],
   })
 );
 app.options("*", cors());
 
-// Multer in-memory (so we can email as attachments)
+// Multer in-memory (so we can attach files)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB each
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.post(
   "/apply",
@@ -56,28 +58,16 @@ app.post(
         message,
       } = req.body;
 
-      const EMAIL_USER = process.env.EMAIL_USER;
-      const EMAIL_PASS = process.env.EMAIL_PASS;
+      const RESEND_API_KEY = process.env.RESEND_API_KEY;
+      const FROM_EMAIL = process.env.FROM_EMAIL;
       const TO_EMAIL = process.env.TO_EMAIL;
 
-      if (!EMAIL_USER || !EMAIL_PASS || !TO_EMAIL) {
+      if (!RESEND_API_KEY || !FROM_EMAIL || !TO_EMAIL) {
         return res.status(500).json({
           ok: false,
-          error: "Missing EMAIL_USER / EMAIL_PASS / TO_EMAIL in .env",
+          error: "Missing RESEND_API_KEY / FROM_EMAIL / TO_EMAIL in env",
         });
       }
-
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: EMAIL_USER,
-          pass: EMAIL_PASS, // Gmail App Password (not normal password)
-        },
-      });
-
-      // ✅ This will tell you immediately if Gmail auth is correct
-      await transporter.verify();
-      console.log("✅ SMTP verified");
 
       const files = req.files || {};
       const attachments = [];
@@ -87,16 +77,11 @@ app.post(
         if (!f) return;
         attachments.push({
           filename: f.originalname,
-          content: f.buffer,
-          contentType: f.mimetype,
+          content: f.buffer.toString("base64"), // Resend expects Base64 string or Buffer :contentReference[oaicite:1]{index=1}
         });
       };
 
-      addAttachment("pan");
-      addAttachment("aadhaar");
-      addAttachment("gst");
-      addAttachment("udyam");
-      addAttachment("other");
+      ["pan", "aadhaar", "gst", "udyam", "other"].forEach(addAttachment);
 
       console.log("Attachments count:", attachments.length);
 
@@ -121,16 +106,23 @@ Loan Amount: ${loanAmount || ""}
 Loan Purpose: ${loanPurpose || ""}
         `.trim();
 
-      const info = await transporter.sendMail({
-        from: EMAIL_USER,
-        to: TO_EMAIL,
+      const { data, error } = await resend.emails.send({
+        from: FROM_EMAIL,
+        to: [TO_EMAIL],
         subject: `New Application - ${fullName || "Unknown"} (${mobile || "No Mobile"})`,
         text,
-        attachments,
+        attachments: attachments.length ? attachments : undefined,
       });
 
-      console.log("✅ Mail sent:", info.messageId, info.response);
+      if (error) {
+        console.error("❌ Resend error:", error);
+        return res.status(500).json({
+          ok: false,
+          error: error.message || "Resend email failed",
+        });
+      }
 
+      console.log("✅ Email sent via Resend:", data?.id);
       return res.json({ ok: true });
     } catch (err) {
       console.error("Server error:", err);
@@ -143,4 +135,6 @@ Loan Purpose: ${loanPurpose || ""}
 );
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, "0.0.0.0", () => console.log(`✅ Server running on http://localhost:${PORT}`));
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`✅ Server running on http://localhost:${PORT}`)
+);
