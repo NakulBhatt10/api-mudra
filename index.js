@@ -34,7 +34,13 @@ app.post(
     { name: "aadhaar", maxCount: 1 },
     { name: "gst", maxCount: 1 },
     { name: "udyam", maxCount: 1 },
-    { name: "other", maxCount: 1 },
+
+    // ✅ NEW REQUIRED DOCS
+    { name: "gst3b12m", maxCount: 1 },
+    { name: "bankStatement12m", maxCount: 1 },
+    { name: "itr3y", maxCount: 1 },
+
+    // { name: "other", maxCount: 1 }, // optional (remove if not used)
   ]),
   async (req, res) => {
     try {
@@ -77,11 +83,12 @@ app.post(
         if (!f) return;
         attachments.push({
           filename: f.originalname,
-          content: f.buffer.toString("base64"), // Resend expects Base64 string or Buffer :contentReference[oaicite:1]{index=1}
+          content: f.buffer.toString("base64"), // Resend expects Base64 string
         });
       };
 
-      ["pan", "aadhaar", "gst", "udyam", "other"].forEach(addAttachment);
+      // ✅ INCLUDE ALL REQUIRED DOCS IN EMAIL
+      ["pan", "aadhaar", "gst", "udyam", "gst3b12m", "bankStatement12m", "itr3y"].forEach(addAttachment);
 
       console.log("Attachments count:", attachments.length);
 
